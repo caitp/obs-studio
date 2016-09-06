@@ -1819,6 +1819,10 @@ int main(int argc, char *argv[])
 	int ret = run_program(logFile, argc, argv);
 
 	blog(LOG_INFO, "Number of memory leaks: %ld", bnum_allocs());
+	if (bnum_allocs()) {
+		blog(LOG_INFO, "Leak ptrs: \n");
+		bmem_print_leaks();
+	}
 	base_set_log_handler(nullptr, nullptr);
 	return ret;
 }

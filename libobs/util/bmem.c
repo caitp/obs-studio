@@ -95,7 +95,55 @@ void base_set_allocator(struct base_allocator *defs)
 	memcpy(&alloc, defs, sizeof(struct base_allocator));
 }
 
-void *bmalloc(size_t size)
+struct s_alloc_list {
+	void* ptr;
+	const char* reason;
+	struct s_alloc_list* next;
+};
+
+static struct s_alloc_list* alloc_list = NULL;
+static pthread_mutex_t alloc_list_mutex = PTHREAD_MUTEX_INITIALIZER;
+void addToList(struct s_alloc_list** list, void* ptr, const char* reason) {
+	if (reason == NULL)
+		reason = "unknown";
+	pthread_mutex_lock(&alloc_list_mutex);
+	struct s_alloc_list* new_list = malloc(sizeof(struct s_alloc_list));
+	new_list->ptr = ptr;
+	new_list->next = *list;
+	new_list->reason = strdup(reason);
+	*list = new_list;
+	pthread_mutex_unlock(&alloc_list_mutex);
+}
+
+void removeFromList(struct s_alloc_list** list, void* ptr) {
+	pthread_mutex_lock(&alloc_list_mutex);
+	struct s_alloc_list* curr = (*list);
+	struct s_alloc_list* prev = NULL;
+	while (curr) {
+		struct s_alloc_list* next = curr->next;
+		if (curr->ptr == ptr) {
+			if (prev)
+				prev->next = next;
+			if (curr == *list)
+				*list = next;
+			free(curr);
+			break;
+		}
+		prev = curr;
+		curr = next;
+	}
+	pthread_mutex_unlock(&alloc_list_mutex);
+}
+
+const char* concatFuncReason(const char* func, const char* reason) {
+	size_t length = strlen(func) + strlen(reason) + 1;
+	char* buf = malloc(length);
+	*buf = 0;
+	snprintf(buf, length, "%s %s", func, reason);
+	return buf;
+}
+
+void *__bmalloc__(size_t size, const char* func, const char* reason)
 {
 	void *ptr = alloc.malloc(size);
 	if (!ptr && !size)
@@ -107,14 +155,16 @@ void *bmalloc(size_t size)
 	}
 
 	os_atomic_inc_long(&num_allocs);
+	addToList(&alloc_list, ptr, concatFuncReason(func, reason));
 	return ptr;
 }
 
-void *brealloc(void *ptr, size_t size)
+void *__brealloc__(void *ptr, size_t size, const char* func, const char* reason)
 {
 	if (!ptr)
 		os_atomic_inc_long(&num_allocs);
-
+	else
+		removeFromList(&alloc_list, ptr);
 	ptr = alloc.realloc(ptr, size);
 	if (!ptr && !size)
 		ptr = alloc.realloc(ptr, 1);
@@ -123,14 +173,18 @@ void *brealloc(void *ptr, size_t size)
 		bcrash("Out of memory while trying to allocate %lu bytes",
 				(unsigned long)size);
 	}
+	if (ptr)
+		addToList(&alloc_list, ptr, concatFuncReason(func, reason));
 
 	return ptr;
 }
 
 void bfree(void *ptr)
 {
-	if (ptr)
+	if (ptr) {
 		os_atomic_dec_long(&num_allocs);
+		removeFromList(&alloc_list, ptr);
+	}
 	alloc.free(ptr);
 }
 
@@ -139,14 +193,27 @@ long bnum_allocs(void)
 	return num_allocs;
 }
 
+void bmem_print_leaks(void)
+{
+	pthread_mutex_lock(&alloc_list_mutex);
+	while (alloc_list) {
+		struct s_alloc_list* next = alloc_list->next;
+		blog(LOG_INFO, "  %p (%s)", alloc_list->ptr, alloc_list->reason);
+		free(alloc_list->reason);
+		free(alloc_list);
+		alloc_list = next;
+	}
+	pthread_mutex_unlock(&alloc_list_mutex);
+}
+
 int base_get_alignment(void)
 {
 	return ALIGNMENT;
 }
 
-void *bmemdup(const void *ptr, size_t size)
+void *__bmemdup__(const void *ptr, size_t size, const char* func, const char* reason)
 {
-	void *out = bmalloc(size);
+	void *out = __bmalloc__(size, func, reason);
 	if (size)
 		memcpy(out, ptr, size);
 

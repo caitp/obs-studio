@@ -31,65 +31,82 @@ struct base_allocator {
 	void (*free)(void *);
 };
 
+#define __EXP1(X) #X
+#define __EXP(X) __EXP1(X)
+#define __PRETTY_MEM_REASON__  __PRETTY_FUNCTION__, " (" __EXP(__FILE__) ":" __EXP(__LINE__) ")"
+
 EXPORT void base_set_allocator(struct base_allocator *defs);
 
-EXPORT void *bmalloc(size_t size);
-EXPORT void *brealloc(void *ptr, size_t size);
+EXPORT void *__bmalloc__(size_t size, const char* func, const char* reason);
+#define bmalloc(size) __bmalloc__(size, __PRETTY_MEM_REASON__)
+EXPORT void *__brealloc__(void *ptr, size_t size, const char* func, const char* reason);
+#define brealloc(ptr, size) __brealloc__(ptr, size, __PRETTY_MEM_REASON__)
 EXPORT void bfree(void *ptr);
 
 EXPORT int base_get_alignment(void);
 
 EXPORT long bnum_allocs(void);
+EXPORT void bmem_print_leaks(void);
 
-EXPORT void *bmemdup(const void *ptr, size_t size);
+EXPORT void *__bmemdup__(const void *ptr, size_t size, const char* func, const char* reason);
+#define bmemdup(ptr, size) __bmemdup__((ptr), (size), __PRETTY_MEM_REASON__)
 
-static inline void *bzalloc(size_t size)
+static inline void *__bzalloc__(size_t size, const char* func, const char* reason)
 {
-	void *mem = bmalloc(size);
+	void *mem = __bmalloc__(size, func, reason);
 	if (mem)
 		memset(mem, 0, size);
 	return mem;
 }
 
-static inline char *bstrdup_n(const char *str, size_t n)
+#define bzalloc(size) __bzalloc__(size, __PRETTY_MEM_REASON__)
+
+static inline char *__bstrdup_n__(const char *str, size_t n, const char* func, const char* reason)
 {
 	char *dup;
 	if (!str)
 		return NULL;
 
-	dup = (char*)bmemdup(str, n+1);
+	dup = (char*)__bmemdup__(str, n+1, func, reason);
 	dup[n] = 0;
 
 	return dup;
 }
 
-static inline wchar_t *bwstrdup_n(const wchar_t *str, size_t n)
+#define bstrdup_n(str, n) __bstrdup_n__(str, n, __PRETTY_MEM_REASON__)
+
+static inline wchar_t *__bwstrdup_n__(const wchar_t *str, size_t n, const char* func, const char* reason)
 {
 	wchar_t *dup;
 	if (!str)
 		return NULL;
 
-	dup = (wchar_t*)bmemdup(str, (n+1) * sizeof(wchar_t));
+	dup = (wchar_t*)__bmemdup__(str, (n+1) * sizeof(wchar_t), func, reason);
 	dup[n] = 0;
 
 	return dup;
 }
 
-static inline char *bstrdup(const char *str)
+#define bwstrdup_n(str, n) __bwstrdup_n__(str, n, __PRETTY_MEM_REASON__)
+
+static inline char *__bstrdup__(const char *str, const char* func, const char* reason)
 {
 	if (!str)
 		return NULL;
 
-	return bstrdup_n(str, strlen(str));
+	return __bstrdup_n__(str, strlen(str), func, reason);
 }
 
-static inline wchar_t *bwstrdup(const wchar_t *str)
+#define bstrdup(str) __bstrdup__(str, __PRETTY_MEM_REASON__)
+
+static inline wchar_t *__bwstrdup__(const wchar_t *str, const char* func, const char* reason)
 {
 	if (!str)
 		return NULL;
 
-	return bwstrdup_n(str, wcslen(str));
+	return __bwstrdup_n__(str, wcslen(str), func, reason);
 }
+#define bwstrdup(str) __bwstrdup__(str, __PRETTY_MEM_REASON__)
 
 #ifdef __cplusplus
 }
